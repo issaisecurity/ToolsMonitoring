@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tool QR Scanner with Google Sheets & CSV</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body { font-family: Arial; text-align: center; padding: 20px; }
+    table { margin: 30px auto; border-collapse: collapse; width: 90%; }
+    th, td { border: 1px solid #aaa; padding: 8px; text-align: center; }
+    th { background-color: #f2f2f2; }
+    .expired { color: red; font-weight: bold; }
+    #result { margin: 20px auto; padding: 10px; background: #f0fdf4; border: 2px solid #4CAF50; width: 60%; }
+    #qr-reader { width: 300px; margin: auto; }
+  </style>
+</head>
+<body>
+  <h2>?? Tool QR Code Status Scanner</h2>
+  <div id="qr-reader"></div>
+  <div id="result" style="display:none;"></div>
+
+  <h3>?? Scan Log</h3>
+  <table id="log-table">
+    <thead>
+      <tr><th>Status</th><th>Validity</th><th>Expiry Status</th><th>Scan Time</th></tr>
+    </thead>
+    <tbody id="log-body"></tbody>
+  </table>
+
+  <button onclick="downloadCSV()">?? Download CSV</button>
+
+  <script>
+    const logs = [];
+
+    function parseValidityDate(text) {
+      const match = text.match(/Valid Until ([A-Za-z]+)\s+(\d{4})/i);
+      if (!match) return null;
+      const [_, month, year] = match;
+      const date = new Date(`${month} 1, ${year}`);
+      return isNaN(date) ? null : new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    }
+
+    function isExpired(validityText) {
+      const expiryDate = parseValidityDate(validityText);
+      if (!expiryDate) return false;
+      const now = new Date();
+      return now > expiryDate;
+    }
+
+    function logScan(statusLine, validityLine) {
+      const tableBody = document.getElementById('log-body');
+      const newRow = document.createElement('tr');
+
+      const expired = isExpired(validityLine);
+      const scanTime = new Date().toLocaleString();
+
+      const rowData = {
+        status: statusLine,
+        validity: validityLine,
+        expiryStatus: expired ? "EXPIRED" : "VALID",
+        scanTime: scanTime
+      };
+
+      // Add to memory log
+      logs.push(rowData);
+      uploadToGoogleSheets(rowData); // Send to Google Sheets
+
+      ["status", "validity", "expiryStatus", "scanTime"].forEach(key => {
+        const td = document.createElement('td');
+        td.textContent = rowData[key];
+        if (key === "expiryStatus" && rowData[key] === "EXPIRED") td.classList.add('expired');
+        newRow.appendChild(td);
+      });
+
+      tableBody.appendChild(newRow);
+    }
+
+    function showResult(data) {
+      const resultBox = document.getElementById('result');
+      const lines = data.trim().split("\n");
+
+      const statusLine = lines[0] || "Unknown";
+      const validityLine = lines[1] || "Unknown";
+
+      resultBox.style.display = 'block';
+      resultBox.innerHTML = `<strong>Status:</strong> ${statusLine}<br>
+                             <strong>Validity:</strong> ${validityLine}<br>
+                             <strong>Scan Time:</strong> ${new Date().toLocaleString()}`;
+
+      logScan(statusLine, validityLine);
+    }
+
+    function startScanner() {
+      const scanner = new Html5Qrcode("qr-reader");
+      scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        qrMessage => {
+          showResult(qrMessage);
+          scanner.stop();
+          setTimeout(() => startScanner(), 2000);
+        },
+        error => { }
+      );
+    }
+
+    function downloadCSV() {
+      const csvContent = "data:text/csv;charset=utf-8," +
+        ["Status,Validity,Expiry Status,Scan Time"]
+        .concat(logs.map(r => `${r.status},${r.validity},${r.expiryStatus},${r.scanTime}`))
+        .join("\n");
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "tool_scan_log.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // ?? Google Sheets Upload (via Apps Script Webhook)
+    function uploadToGoogleSheets(rowData) {
+      fetch("YOUR_WEB_APP_URL_HERE", {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rowData)
+      });
+    }
+
+    startScanner();
+  </script>
+</body>
+</html>
